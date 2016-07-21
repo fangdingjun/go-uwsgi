@@ -322,13 +322,57 @@ type Passenger struct {
 	Addr string
 }
 
-// ServerHTTP implement http.Handler interface
-func (p Passenger) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+// UwsgiPass pass the request to uwsgi interface
+func (p Passenger) UwsgiPass(w http.ResponseWriter, req *http.Request, params map[string][]string) {
 	conn, err := net.Dial(p.Net, p.Addr)
 	if err != nil {
-		panic(err.Error())
+		w.WriteHeader(504)
+		fmt.Fprintf(w, "Bad gateway\n")
+		return
 	}
 	defer conn.Close()
+
+	var size uint16
+	for k, v := range params {
+		for _, vv := range v {
+			size += uint16(len(([]byte)(k))) + 2
+			size += uint16(len(([]byte)(vv))) + 2
+		}
+	}
+
+	hsize := make([]byte, 4)
+	binary.LittleEndian.PutUint16(hsize[1:3], size)
+	conn.Write(hsize)
+
+	for k, v := range params {
+		for _, vv := range v {
+			binary.Write(conn, binary.LittleEndian, uint16(len(([]byte)(k))))
+			conn.Write([]byte(k))
+			binary.Write(conn, binary.LittleEndian, uint16(len(([]byte)(vv))))
+			conn.Write([]byte(vv))
+		}
+	}
+
+	io.Copy(conn, req.Body)
+
+	res, err := http.ReadResponse(bufio.NewReader(conn), req)
+	if err != nil {
+		w.WriteHeader(504)
+		fmt.Fprintf(w, "Bad gateway\n")
+		return
+	}
+	for k, v := range res.Header {
+		w.Header().Del(k)
+		for _, vv := range v {
+			w.Header().Add(k, vv)
+		}
+	}
+	w.WriteHeader(res.StatusCode)
+	io.Copy(w, res.Body)
+}
+
+// ServerHTTP implement http.Handler interface
+func (p Passenger) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	port := "80"
 
@@ -366,38 +410,5 @@ func (p Passenger) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	var size uint16
-	for k, v := range header {
-		for _, vv := range v {
-			size += uint16(len(([]byte)(k))) + 2
-			size += uint16(len(([]byte)(vv))) + 2
-		}
-	}
-
-	hsize := make([]byte, 4)
-	binary.LittleEndian.PutUint16(hsize[1:3], size)
-	conn.Write(hsize)
-
-	for k, v := range header {
-		for _, vv := range v {
-			binary.Write(conn, binary.LittleEndian, uint16(len(([]byte)(k))))
-			conn.Write([]byte(k))
-			binary.Write(conn, binary.LittleEndian, uint16(len(([]byte)(vv))))
-			conn.Write([]byte(vv))
-		}
-	}
-
-	io.Copy(conn, req.Body)
-
-	res, err := http.ReadResponse(bufio.NewReader(conn), req)
-	if err != nil {
-		panic(err.Error())
-	}
-	for k, v := range res.Header {
-		w.Header().Del(k)
-		for _, vv := range v {
-			w.Header().Add(k, vv)
-		}
-	}
-	io.Copy(w, res.Body)
+	p.UwsgiPass(w, req, header)
 }
