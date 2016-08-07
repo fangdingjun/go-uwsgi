@@ -326,7 +326,7 @@ type Passenger struct {
 func (p Passenger) UwsgiPass(w http.ResponseWriter, req *http.Request, params map[string][]string) {
 	conn, err := net.Dial(p.Net, p.Addr)
 	if err != nil {
-		w.WriteHeader(504)
+		w.WriteHeader(http.StatusBadGateway)
 		fmt.Fprintf(w, "Bad gateway\n")
 		return
 	}
@@ -357,7 +357,7 @@ func (p Passenger) UwsgiPass(w http.ResponseWriter, req *http.Request, params ma
 
 	res, err := http.ReadResponse(bufio.NewReader(conn), req)
 	if err != nil {
-		w.WriteHeader(504)
+		w.WriteHeader(http.StatusBadGateway)
 		fmt.Fprintf(w, "Bad gateway\n")
 		return
 	}
